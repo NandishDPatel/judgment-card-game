@@ -56,8 +56,8 @@ export function addPlayer(room, name) {
 }
 
 export function startGame(room) {
-  if (room.players.length < 3) {
-    throw new Error('Need at least 3 players.');
+  if (room.players.length < 2) {
+    throw new Error('Need at least 2 players.');
   }
   room.phase = 'bidding';
   room.roundIndex = 0;

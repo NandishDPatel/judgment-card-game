@@ -197,7 +197,7 @@ export default function App() {
               </div>
             ) : null}
           </div>
-          <div className="mt-4 flex flex-nowrap gap-3 overflow-x-auto pb-2 md:flex-wrap">
+          <div className="mt-4 flex gap-3 overflow-x-auto pb-2 flex-wrap justify-between">
             {mePlayer?.hand?.map((card) => (
               <Card
                 key={card.id}
