@@ -9,12 +9,23 @@ function polarToStyle(index, total) {
   return { left: `${x}%`, top: `${y}%` };
 }
 
+function suitSymbol(key) {
+  if (key === 'S') return '♠';
+  if (key === 'D') return '♦';
+  if (key === 'C') return '♣';
+  if (key === 'H') return '♥';
+  return '?';
+}
+
 export default function Table({
   players,
   trick,
   currentTurnPlayerId,
   winnerId,
   roundTricks,
+  roundBids,
+  cardsPerPlayer,
+  trumpSuit,
   showLastTrick,
   nextPlayerName
 }) {
@@ -33,36 +44,50 @@ export default function Table({
   return (
     <div className="relative mx-auto flex h-[320px] w-full max-w-4xl items-center justify-center sm:h-[420px]">
       <div className="table-oval h-full w-full" />
+      {trumpSuit ? (
+        <div className="pointer-events-none absolute flex flex-col items-center justify-center text-center">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-felt-200/70 sm:text-xs">
+            Trump
+          </div>
+          <div className="mt-1 text-6xl text-white/8 sm:text-7xl md:text-8xl">
+            {suitSymbol(trumpSuit)}
+          </div>
+        </div>
+      ) : null}
       <div className="absolute inset-0">
         {players.map((player, idx) => (
           <div
             key={player.id}
-            className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border px-3 py-2 text-xs font-semibold ${
+            className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-2xl border px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-[2px] ${
               currentTurnPlayerId === player.id
                 ? 'border-amber-300 bg-amber-200/20 text-amber-100'
                 : 'border-white/20 bg-black/50'
             }`}
             style={polarToStyle(idx, players.length)}
           >
-            <div>{player.name}</div>
-            <div className="text-[10px] text-felt-200">Cards: {player.handCount ?? 0}</div>
-            <div className="text-[10px] text-felt-200">Tricks: {roundTricks?.[player.id] ?? 0}</div>
+            <div className="max-w-[7rem] truncate text-center">{player.name}</div>
+            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-medium text-felt-200">
+              <span>Total: {cardsPerPlayer ?? 0}</span>
+              <span>Left: {player.handCount ?? 0}</span>
+              <span>Bid: {roundBids?.[player.id] ?? 0}</span>
+              <span>Got: {roundTricks?.[player.id] ?? 0}</span>
+            </div>
           </div>
         ))}
       </div>
-      <div className="absolute flex items-center gap-4">
+      <div className="absolute left-1/2 top-1/2 z-10 flex w-[calc(100%-2.5rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-wrap items-start justify-center gap-2 sm:w-auto sm:max-w-none sm:flex-nowrap sm:items-center sm:gap-4">
         {trick.cards?.map((play) => (
           <div
             key={play.playerId}
             style={showLastTrick && winnerId ? { '--dx': dx, '--dy': dy } : {}}
-            className={`flex flex-col items-center ${
+            className={`flex min-w-[4rem] flex-col items-center ${
               winnerId === play.playerId ? 'scale-105' : ''
             } ${showLastTrick && winnerId ? 'move-to-winner' : ''}`}
           >
             <div className={winnerId === play.playerId ? 'winner-glow ring-2 ring-amber-300' : ''}>
-              <Card card={play.card} selectable={false} disabled />
+              <Card card={play.card} selectable={false} disabled compact dimWhenInactive={false} />
             </div>
-            <div className="mt-2 text-xs text-felt-200">
+            <div className="mt-1 text-center text-[10px] text-felt-200 sm:mt-2 sm:text-xs">
               {play.playerName}
               {winnerId === play.playerId ? ' • Winner' : ''}
             </div>

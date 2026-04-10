@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 const SUITS = ['S', 'D', 'C', 'H'];
 const RANKS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
-export function createRoom({ name, maxPlayers, decks }) {
+export function createRoom({ name, maxPlayers, decks, reconnectToken }) {
   if (!name || name.trim().length === 0) {
     throw new Error('Name is required.');
   }
@@ -12,7 +12,7 @@ export function createRoom({ name, maxPlayers, decks }) {
   }
   const code = nanoid(6).toUpperCase();
   const hostId = nanoid();
-  const players = [createPlayer(hostId, name, 0)];
+  const players = [createPlayer(hostId, name, 0, reconnectToken)];
   const maxCards = Math.floor((52 * decks) / maxPlayers);
   const roundSequence = buildRoundSequence(maxCards);
 
@@ -35,12 +35,22 @@ export function createRoom({ name, maxPlayers, decks }) {
   };
 }
 
-export function addPlayer(room, name) {
+export function addPlayer(room, name, reconnectToken) {
   if (!name || name.trim().length === 0) {
     throw new Error('Name is required.');
   }
+  if (reconnectToken) {
+    const existingByToken = room.players.find((player) => player.reconnectToken === reconnectToken);
+    if (existingByToken) {
+      return existingByToken.id;
+    }
+  }
   const existing = room.players.find((player) => player.name.toLowerCase() === name.toLowerCase());
   if (existing) {
+    if (room.phase !== 'lobby') {
+      throw new Error('This player can only rejoin from the original device.');
+    }
+    existing.reconnectToken = reconnectToken ?? existing.reconnectToken ?? nanoid();
     return existing.id;
   }
   if (room.phase !== 'lobby') {
@@ -51,7 +61,7 @@ export function addPlayer(room, name) {
   }
   const seatIndex = room.players.length;
   const playerId = nanoid();
-  room.players.push(createPlayer(playerId, name, seatIndex));
+  room.players.push(createPlayer(playerId, name, seatIndex, reconnectToken));
   return playerId;
 }
 
@@ -64,11 +74,12 @@ export function startGame(room) {
   startRound(room, room.roundSequence[room.roundIndex]);
 }
 
-function createPlayer(id, name, seatIndex) {
+function createPlayer(id, name, seatIndex, reconnectToken) {
   return {
     id,
     name: name.trim(),
     seatIndex,
+    reconnectToken: reconnectToken ?? nanoid(),
     totalScore: 0,
     hand: [],
     handCount: 0
