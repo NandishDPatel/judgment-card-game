@@ -62,7 +62,7 @@ export default function Scoreboard({ players, rounds, currentRound }) {
         </tbody>
         <tfoot>
           <tr className="border-t border-white/10 text-felt-50">
-            <td className="pt-3 font-semibold" colSpan={2}>Total</td>
+            <td className="pt-3 font-semibold" colSpan={3}>Total</td>
             {players.map((player) => (
               <td key={player.id} className="pt-3 font-semibold">
                 {player.totalScore ?? 0}
