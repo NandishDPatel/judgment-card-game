@@ -57,7 +57,6 @@ export default function CreateJoin({
           <span className={`rounded-full border px-3 py-1 ${status === 'connected' ? 'border-emerald-300/50 text-emerald-200' : 'border-amber-300/40 text-amber-200'}`}>
             Connection: {status}
           </span>
-          <span>Server must be running at ws://localhost:8080</span>
         </div>
         {notification ? (
           <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-200/10 px-4 py-2 text-sm text-amber-100">
