@@ -28,7 +28,7 @@ const store = new Store();
 const clientMeta = new Map();
 
 function setTurnTimer(room) {
-  if (room.phase === "finished") {
+  if (room.phase === "lobby" || room.phase === "finished") {
     room.turnExpiresAt = null;
     room.turnNotified = false;
     return;
@@ -82,27 +82,16 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      // if (type === 'room:join') {
-      //   const room = await store.getRoom(payload.roomCode);
-      //   if (!room) throw new Error('Room not found.');
-      //   const playerId = addPlayer(room, payload.name, payload.reconnectToken);
-      //   clientMeta.set(ws, { roomCode: room.code, playerId });
-      //   await store.saveRoom(room);
-      //   broadcastRoom(room);
-      //   return;
-      // }
       if (type === "room:join") {
         const room = await store.getRoom(payload.roomCode);
 
         if (!room) throw new Error("Room not found.");
 
-        // ✅ Check for reconnecting player FIRST, before any phase checks
         const existingPlayer = room.players.find(
           (p) => p.reconnectToken === payload.reconnectToken,
         );
 
         if (existingPlayer) {
-          // Rebind this websocket to the existing player
           existingPlayer.connected = true;
           clientMeta.set(ws, {
             roomCode: room.code,
@@ -113,7 +102,6 @@ wss.on("connection", (ws) => {
           return;
         }
 
-        // Only new players hit this — block them if game started
         if (room.phase !== "lobby") {
           throw new Error("Game already started. Cannot join mid-game.");
         }
@@ -200,11 +188,6 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // ws.on("close", () => {
-  //   const meta = clientMeta.get(ws);
-  //   clientMeta.delete(ws);
-  //   if (!meta) return;
-  // });
   ws.on('close', () => {
   const meta = clientMeta.get(ws);
   clientMeta.delete(ws);
@@ -216,7 +199,7 @@ wss.on("connection", (ws) => {
     if (!player) return;
     player.connected = false;
     store.saveRoom(room);
-    broadcastRoom(room);  // lets other players see the disconnection
+    broadcastRoom(room); 
   });
 });
 });
