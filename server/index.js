@@ -68,11 +68,29 @@ function notifyPlayer(room, playerId, message) {
   });
 }
 
+async function releaseClientRoom(ws) {
+  const previousMeta = clientMeta.get(ws);
+  if (!previousMeta) return;
+
+  const previousRoom = await store.getRoom(previousMeta.roomCode);
+  if (!previousRoom) return;
+
+  const previousPlayer = previousRoom.players.find(
+    (player) => player.id === previousMeta.playerId,
+  );
+  if (!previousPlayer) return;
+
+  previousPlayer.connected = false;
+  await store.saveRoom(previousRoom);
+  broadcastRoom(previousRoom);
+}
+
 wss.on("connection", (ws) => {
   ws.on("message", async (raw) => {
     try {
       const { type, payload } = JSON.parse(raw.toString());
       if (type === "room:create") {
+        await releaseClientRoom(ws);
         const room = createRoom(payload);
         const playerId = room.players[0].id;
         clientMeta.set(ws, { roomCode: room.code, playerId });
@@ -86,6 +104,7 @@ wss.on("connection", (ws) => {
         const room = await store.getRoom(payload.roomCode);
 
         if (!room) throw new Error("Room not found.");
+        await releaseClientRoom(ws);
 
         const existingPlayer = room.players.find(
           (p) => p.reconnectToken === payload.reconnectToken,

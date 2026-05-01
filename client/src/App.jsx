@@ -30,14 +30,11 @@ export default function App() {
     useGameClient();
   const reconnectToken = useMemo(() => getReconnectToken(), []);
 
-  const urlRoomCode = useMemo(
-    () =>
-      new URLSearchParams(window.location.search).get('room')?.toUpperCase() ?? '',
-    []
+  const [urlRoomCode, setUrlRoomCode] = useState(
+    () => new URLSearchParams(window.location.search).get('room')?.toUpperCase() ?? ''
   );
-  const storedRoomCode = useMemo(
-    () => window.localStorage.getItem('judgment:lastRoom') ?? '',
-    []
+  const [storedRoomCode, setStoredRoomCode] = useState(
+    () => window.localStorage.getItem('judgment:lastRoom') ?? ''
   );
 
   const initialRoomCode = urlRoomCode || storedRoomCode;
@@ -66,14 +63,29 @@ export default function App() {
   const [showLastTrick, setShowLastTrick] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
+  function resetToHome() {
+    clearRoom();
+    clearNotification();
+    lastJoinedConnectionRef.current = null;
+    window.localStorage.removeItem('judgment:lastRoom');
+    setStoredRoomCode('');
+    setUrlRoomCode('');
+
+    const current = new URL(window.location.href);
+    current.searchParams.delete('room');
+    window.history.replaceState({}, '', current.toString());
+  }
+
   useEffect(() => {
     if (room?.code && mePlayer?.name) {
       window.localStorage.setItem(`judgment:name:${room.code}`, mePlayer.name);
       window.localStorage.setItem('judgment:lastRoom', room.code);
+      setStoredRoomCode(room.code);
       const current = new URL(window.location.href);
       if (current.searchParams.get('room') !== room.code) {
         current.searchParams.set('room', room.code);
         window.history.replaceState({}, '', current.toString());
+        setUrlRoomCode(room.code);
       }
     }
   }, [room?.code, mePlayer?.name]);
@@ -129,6 +141,8 @@ export default function App() {
               payload.name
             );
             window.localStorage.setItem('judgment:lastRoom', payload.roomCode);
+            setStoredRoomCode(payload.roomCode);
+            setUrlRoomCode(payload.roomCode);
             send('room:join', { ...payload, reconnectToken });
           }}
         />
@@ -147,6 +161,7 @@ export default function App() {
           onDismiss={clearNotification}
           onHelp={() => setShowHelp(true)}
           onStart={() => send('room:start', { roomCode: room.code })}
+          onCreateNewGame={resetToHome}
         />
         <HelpModal open={showHelp} onClose={() => setShowHelp(false)} />
       </>
