@@ -53,9 +53,12 @@ export default function CreateJoin({
             ? 'You were invited to a room. Join quickly from the form below, or start your own game from the corner button.'
             : 'Create a room, invite friends, and play real-time tricks with rotating trump.'}
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-felt-200">
+        <div className="mt-4 flex items-center gap-3 text-xs text-felt-200">
           <span className={`rounded-full border px-3 py-1 ${status === 'connected' ? 'border-emerald-300/50 text-emerald-200' : 'border-amber-300/40 text-amber-200'}`}>
             Connection: {status}
+          </span>
+          <span className='ms-2 text-red-200'>
+            {(status === 'disconnected' || status === 'connecting') && 'Please wait—first-time setup takes up to 15 seconds.'}
           </span>
         </div>
         {notification ? (

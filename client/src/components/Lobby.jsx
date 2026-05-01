@@ -1,8 +1,36 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
-export default function Lobby({ room, me, onStart, notification, onDismiss, onHelp }) {
+export default function Lobby({
+  room,
+  me,
+  onStart,
+  onCreateNewGame,
+  notification,
+  onDismiss,
+  onHelp,
+}) {
   const shareUrl = `${window.location.origin}/?room=${room.code}`;
   const canStart = room.players.length === room.maxPlayers;
+  const [copyStatus, setCopyStatus] = useState('');
+
+  useEffect(() => {
+    if (!copyStatus) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setCopyStatus('');
+    }, 2000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [copyStatus]);
+
+  async function handleCopyLink() {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopyStatus('Link copied');
+    } catch {
+      setCopyStatus('Unable to copy link');
+    }
+  }
 
   return (
     <div className="min-h-screen bg-felt-pattern px-6 py-10">
@@ -23,11 +51,14 @@ export default function Lobby({ room, me, onStart, notification, onDismiss, onHe
             <div className="mt-1 break-all font-semibold text-felt-50">{shareUrl}</div>
             <button
               type="button"
-              onClick={() => navigator.clipboard?.writeText?.(shareUrl)}
+              onClick={handleCopyLink}
               className="mt-3 rounded-full border border-white/20 px-3 py-1 text-xs transition hover:bg-white/10 active:scale-[0.98]"
             >
               Copy Link
             </button>
+            {copyStatus ? (
+              <span className="ms-2 text-xs text-amber-200">{copyStatus}</span>
+            ) : null}
           </div>
         </div>
         {notification ? (
@@ -62,14 +93,23 @@ export default function Lobby({ room, me, onStart, notification, onDismiss, onHe
               <div>Decks: {room.decks}</div>
             </div>
             {me?.id === room.hostId ? (
-              <button
-                type="button"
-                disabled={!canStart}
-                onClick={onStart}
-                className="mt-6 w-full rounded-lg bg-felt-400 px-4 py-2 font-semibold text-white transition hover:bg-felt-600 active:scale-[0.99] disabled:opacity-50"
-              >
-                Start Game
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={!canStart}
+                  onClick={onStart}
+                  className="mt-6 w-full rounded-lg bg-felt-400 px-4 py-2 font-semibold text-white transition hover:bg-felt-600 active:scale-[0.99] disabled:opacity-50"
+                >
+                  Start Game
+                </button>
+                <button
+                  type="button"
+                  onClick={onCreateNewGame}
+                  className="mt-3 w-full rounded-lg border border-amber-300/50 bg-amber-200/10 px-4 py-2 font-semibold text-amber-100 transition hover:bg-amber-200/20 active:scale-[0.99]"
+                >
+                  Create New Game
+                </button>
+              </>
             ) : (
               <div className="mt-6 text-sm text-felt-200">
                 Waiting for the host to start the game.
