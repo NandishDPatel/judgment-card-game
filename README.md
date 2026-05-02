@@ -1,5 +1,7 @@
 # Judgment aka Kachuful
 
+- Game is accessible live at: **https://judgment-card-game.vercel.app/**
+
 - `client` React + Tailwind (Vercel)
 - `server` Node + WebSockets (Render)
 
