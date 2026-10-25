@@ -5,6 +5,7 @@ import Store from "./store.js";
 import {
   addPlayer,
   createRoom,
+  findPlayerByName,
   placeBid,
   playCard,
   roomView,
@@ -13,6 +14,13 @@ import {
 
 const PORT = process.env.PORT || 8080;
 const TURN_SECONDS = 15;
+
+// Heartbeat: ping every socket; a socket that misses one full interval is dead.
+const HEARTBEAT_MS = 30 * 1000;
+// Room cleanup: delete rooms nobody is using any more.
+const ROOM_IDLE_MS = 60 * 60 * 1000; // no game activity for 60 min
+const ROOM_EMPTY_MS = 15 * 60 * 1000; // every player offline for 15 min
+const CLEANUP_INTERVAL_MS = 60 * 1000;
 
 const app = express();
 app.use(cors());
@@ -25,7 +33,14 @@ const server = app.listen(PORT, () => {
 
 const wss = new WebSocketServer({ server });
 const store = new Store();
+// socket -> { roomCode, playerId }. A socket is just the "phone line";
+// this map is how the server knows which seat is on the other end.
 const clientMeta = new Map();
+
+function sendTo(ws, type, payload) {
+  if (ws.readyState !== ws.OPEN) return;
+  ws.send(JSON.stringify({ type, payload }));
+}
 
 function setTurnTimer(room) {
   if (room.phase === "lobby" || room.phase === "finished") {
@@ -37,96 +52,143 @@ function setTurnTimer(room) {
   room.turnNotified = false;
 }
 
+function touch(room) {
+  room.lastActivityAt = Date.now();
+}
+
 function broadcastRoom(room) {
-  wss.clients.forEach((ws) => {
-    const meta = clientMeta.get(ws);
-    if (!meta || meta.roomCode !== room.code) return;
-    const timer = room.turnExpiresAt
-      ? Math.max(0, Math.ceil((room.turnExpiresAt - Date.now()) / 1000))
-      : TURN_SECONDS;
-    ws.send(
-      JSON.stringify({
-        type: "room:state",
-        payload: {
-          room: roomView(room, meta.playerId),
-          me: { id: meta.playerId },
-          timer,
-        },
-      }),
-    );
-  });
+  const timer = room.turnExpiresAt
+    ? Math.max(0, Math.ceil((room.turnExpiresAt - Date.now()) / 1000))
+    : TURN_SECONDS;
+  for (const [ws, meta] of clientMeta) {
+    if (meta.roomCode !== room.code) continue;
+    sendTo(ws, "room:state", {
+      room: roomView(room, meta.playerId),
+      me: { id: meta.playerId },
+      timer,
+    });
+  }
 }
 
 function notifyPlayer(room, playerId, message) {
-  wss.clients.forEach((ws) => {
-    const meta = clientMeta.get(ws);
-    if (!meta || meta.roomCode !== room.code || meta.playerId !== playerId)
-      return;
-    ws.send(
-      JSON.stringify({ type: "game:notification", payload: { message } }),
-    );
-  });
+  for (const [ws, meta] of clientMeta) {
+    if (meta.roomCode !== room.code || meta.playerId !== playerId) continue;
+    sendTo(ws, "game:notification", { message });
+  }
 }
 
+function socketsForPlayer(roomCode, playerId, exceptWs = null) {
+  const sockets = [];
+  for (const [ws, meta] of clientMeta) {
+    if (ws === exceptWs) continue;
+    if (meta.roomCode === roomCode && meta.playerId === playerId) {
+      sockets.push(ws);
+    }
+  }
+  return sockets;
+}
+
+// Put this socket in a seat. Any older socket still holding that seat
+// (a background tab, WhatsApp's in-app browser, a dead connection) is
+// detached, so the newest connection always wins.
+function attachSocket(ws, room, player) {
+  for (const other of socketsForPlayer(room.code, player.id, ws)) {
+    clientMeta.delete(other);
+    sendTo(other, "room:replaced", {
+      message:
+        "You opened this game in another tab or device, so this one was disconnected.",
+    });
+  }
+  clientMeta.set(ws, { roomCode: room.code, playerId: player.id });
+  player.connected = true;
+  room.allDisconnectedSince = null;
+}
+
+// Mark a seat offline, but only if no other socket still holds it.
+function markDisconnected(room, playerId) {
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) return;
+  if (socketsForPlayer(room.code, playerId).length > 0) return;
+  player.connected = false;
+  if (room.players.every((p) => !p.connected)) {
+    room.allDisconnectedSince ??= Date.now();
+  }
+}
+
+// Called when a socket switches to another room/seat.
 async function releaseClientRoom(ws) {
   const previousMeta = clientMeta.get(ws);
   if (!previousMeta) return;
+  clientMeta.delete(ws);
 
   const previousRoom = await store.getRoom(previousMeta.roomCode);
   if (!previousRoom) return;
-
-  const previousPlayer = previousRoom.players.find(
-    (player) => player.id === previousMeta.playerId,
-  );
-  if (!previousPlayer) return;
-
-  previousPlayer.connected = false;
+  markDisconnected(previousRoom, previousMeta.playerId);
   await store.saveRoom(previousRoom);
   broadcastRoom(previousRoom);
 }
 
 wss.on("connection", (ws) => {
+  ws.isAlive = true;
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
+
   ws.on("message", async (raw) => {
     try {
-      const { type, payload } = JSON.parse(raw.toString());
+      const { type, payload = {} } = JSON.parse(raw.toString());
       if (type === "room:create") {
         await releaseClientRoom(ws);
         const room = createRoom(payload);
-        const playerId = room.players[0].id;
-        clientMeta.set(ws, { roomCode: room.code, playerId });
-        await store.saveRoom(room);
+        attachSocket(ws, room, room.players[0]);
+        touch(room);
         setTurnTimer(room);
+        await store.saveRoom(room);
         broadcastRoom(room);
         return;
       }
 
       if (type === "room:join") {
-        const room = await store.getRoom(payload.roomCode);
-
+        const roomCode = String(payload.roomCode ?? "").trim().toUpperCase();
+        const room = await store.getRoom(roomCode);
         if (!room) throw new Error("Room not found.");
-        await releaseClientRoom(ws);
 
-        const existingPlayer = room.players.find(
-          (p) => p.reconnectToken === payload.reconnectToken,
-        );
+        // 1) Same browser as before: the device token matches a seat.
+        let player = payload.reconnectToken
+          ? room.players.find((p) => p.reconnectToken === payload.reconnectToken)
+          : null;
 
-        if (existingPlayer) {
-          existingPlayer.connected = true;
-          clientMeta.set(ws, {
-            roomCode: room.code,
-            playerId: existingPlayer.id,
-          });
-          await store.saveRoom(room);
-          broadcastRoom(room);
-          return;
+        // 2) Different browser/app/device: claim the seat by typing the same
+        //    name. The seat adopts this browser's token so step 1 works next time.
+        if (!player) {
+          player = findPlayerByName(room, payload.name);
+          if (player && payload.reconnectToken) {
+            player.reconnectToken = payload.reconnectToken;
+          }
         }
 
-        if (room.phase !== "lobby") {
-          throw new Error("Game already started. Cannot join mid-game.");
+        // 3) Genuinely new player: only allowed before the game starts.
+        if (!player) {
+          if (room.phase !== "lobby") {
+            throw new Error(
+              "Game already started. To rejoin, enter exactly the same name you used before.",
+            );
+          }
+          const playerId = addPlayer(room, payload.name, payload.reconnectToken);
+          player = room.players.find((p) => p.id === playerId);
         }
 
-        const playerId = addPlayer(room, payload.name, payload.reconnectToken);
-        clientMeta.set(ws, { roomCode: room.code, playerId });
+        const previousMeta = clientMeta.get(ws);
+        if (
+          previousMeta &&
+          (previousMeta.roomCode !== room.code ||
+            previousMeta.playerId !== player.id)
+        ) {
+          await releaseClientRoom(ws);
+        }
+
+        attachSocket(ws, room, player);
+        touch(room);
         await store.saveRoom(room);
         broadcastRoom(room);
         return;
@@ -143,6 +205,7 @@ wss.on("connection", (ws) => {
         if (room.players.length !== room.maxPlayers)
           throw new Error("Waiting for all players.");
         startGame(room);
+        touch(room);
         setTurnTimer(room);
         await store.saveRoom(room);
         broadcastRoom(room);
@@ -153,6 +216,7 @@ wss.on("connection", (ws) => {
         if (meta.playerId !== room.hostId)
           throw new Error("Only host can stop.");
         room.phase = "finished";
+        touch(room);
         setTurnTimer(room);
         await store.saveRoom(room);
         broadcastRoom(room);
@@ -176,6 +240,7 @@ wss.on("connection", (ws) => {
           player.hand = [];
           player.handCount = 0;
         });
+        touch(room);
         setTurnTimer(room);
         await store.saveRoom(room);
         broadcastRoom(room);
@@ -184,6 +249,7 @@ wss.on("connection", (ws) => {
 
       if (type === "game:bid") {
         placeBid(room, meta.playerId, payload.bid);
+        touch(room);
         setTurnTimer(room);
         await store.saveRoom(room);
         broadcastRoom(room);
@@ -192,38 +258,36 @@ wss.on("connection", (ws) => {
 
       if (type === "game:playCard") {
         playCard(room, meta.playerId, payload.cardId);
+        touch(room);
         setTurnTimer(room);
         await store.saveRoom(room);
         broadcastRoom(room);
         return;
       }
     } catch (error) {
-      ws.send(
-        JSON.stringify({
-          type: "room:error",
-          payload: { message: error.message },
-        }),
-      );
+      sendTo(ws, "room:error", { message: error.message });
     }
   });
 
-  ws.on('close', () => {
-  const meta = clientMeta.get(ws);
-  clientMeta.delete(ws);
-  if (!meta) return;
-
-  store.getRoom(meta.roomCode).then((room) => {
-    if (!room) return;
-    const player = room.players.find((p) => p.id === meta.playerId);
-    if (!player) return;
-    player.connected = false;
-    store.saveRoom(room);
-    broadcastRoom(room); 
+  ws.on("close", async () => {
+    const meta = clientMeta.get(ws);
+    clientMeta.delete(ws);
+    // No meta = this socket was already replaced by a newer one; nothing to do.
+    if (!meta) return;
+    try {
+      const room = await store.getRoom(meta.roomCode);
+      if (!room) return;
+      markDisconnected(room, meta.playerId);
+      await store.saveRoom(room);
+      broadcastRoom(room);
+    } catch (error) {
+      console.error("close handler failed", error);
+    }
   });
 });
-});
 
-setInterval(async () => {
+// Turn timer tick.
+setInterval(() => {
   for (const room of store.rooms.values()) {
     if (!room.turnExpiresAt) continue;
     const remaining = Math.max(
@@ -241,3 +305,41 @@ setInterval(async () => {
     broadcastRoom(room);
   }
 }, 1000);
+
+// Heartbeat: find connections that died silently (phone lost signal, app
+// backgrounded) and close them, which runs the normal "close" handler.
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) {
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, HEARTBEAT_MS);
+
+// Cleanup: remove abandoned rooms and tell anyone still looking at them.
+setInterval(async () => {
+  const now = Date.now();
+  for (const room of [...store.rooms.values()]) {
+    const idleFor = now - (room.lastActivityAt ?? now);
+    const emptyFor = room.allDisconnectedSince
+      ? now - room.allDisconnectedSince
+      : 0;
+    if (idleFor < ROOM_IDLE_MS && emptyFor < ROOM_EMPTY_MS) continue;
+
+    for (const [ws, meta] of [...clientMeta]) {
+      if (meta.roomCode !== room.code) continue;
+      clientMeta.delete(ws);
+      sendTo(ws, "room:closed", {
+        message: "This room was closed because nobody played for a while.",
+      });
+    }
+    try {
+      await store.deleteRoom(room.code);
+    } catch (error) {
+      console.error("room cleanup failed", room.code, error);
+    }
+  }
+}, CLEANUP_INTERVAL_MS);

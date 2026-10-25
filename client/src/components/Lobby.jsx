@@ -78,7 +78,12 @@ export default function Lobby({
             <ul className="mt-4 space-y-2">
               {room.players.map((player) => (
                 <li key={player.id} className="flex items-center justify-between rounded-lg bg-black/30 px-3 py-2">
-                  <span>{player.name}</span>
+                  <span>
+                    {player.name}
+                    {player.connected === false ? (
+                      <span className="ms-2 text-xs text-red-300">Offline</span>
+                    ) : null}
+                  </span>
                   {room.hostId === player.id ? (
                     <span className="rounded-full border border-amber-300 px-2 py-1 text-xs text-amber-200">Host</span>
                   ) : null}

@@ -8,6 +8,13 @@ export default function useGameClient() {
   const [me, setMe] = useState(null);
   const [notification, setNotification] = useState(null);
   const [timer, setTimer] = useState(15);
+  // Goes up by one every time a socket opens. App.jsx re-sends room:join
+  // for each new connection, because the server forgets which seat a
+  // socket belongs to when the old one drops.
+  const [connectionId, setConnectionId] = useState(0);
+  // Goes up when the server ends our session (room closed, or this seat was
+  // opened in another tab/device), so App.jsx can return to the home screen.
+  const [sessionEnded, setSessionEnded] = useState(0);
   const wsRef = useRef(null);
   const intentionalCloseRef = useRef(false);
 
@@ -25,7 +32,10 @@ export default function useGameClient() {
     wsRef.current = ws;
     setStatus('connecting');
 
-    ws.onopen = () => setStatus('connected');
+    ws.onopen = () => {
+      setStatus('connected');
+      setConnectionId((id) => id + 1);
+    };
 
     ws.onclose = () => {
       wsRef.current = null;
@@ -62,6 +72,13 @@ export default function useGameClient() {
             setRoom(null);
             setMe(null);
           }
+        }
+
+        if (msg.type === 'room:closed' || msg.type === 'room:replaced') {
+          setRoom(null);
+          setMe(null);
+          setNotification({ type: 'info', message: msg.payload.message });
+          setSessionEnded((n) => n + 1);
         }
 
         if (msg.type === 'game:notification') {
@@ -101,5 +118,7 @@ export default function useGameClient() {
     clearRoom,
     timer,
     send,
+    connectionId,
+    sessionEnded,
   };
 }

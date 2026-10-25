@@ -62,10 +62,13 @@ export default function Table({
               currentTurnPlayerId === player.id
                 ? 'border-amber-300 bg-amber-200/20 text-amber-100'
                 : 'border-white/20 bg-black/50'
-            }`}
+            } ${player.connected === false ? 'opacity-60' : ''}`}
             style={polarToStyle(idx, players.length)}
           >
             <div className="max-w-[7rem] truncate text-center">{player.name}</div>
+            {player.connected === false ? (
+              <div className="mt-0.5 text-center text-[10px] font-medium text-red-300">Offline</div>
+            ) : null}
             <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] font-medium text-felt-200">
               <span>Total: {cardsPerPlayer ?? 0}</span>
               <span>Left: {player.handCount ?? 0}</span>
