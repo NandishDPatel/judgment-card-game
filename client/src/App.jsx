@@ -26,8 +26,18 @@ function getReconnectToken() {
 }
 
 export default function App() {
-  const { room, me, send, notification, clearNotification, clearRoom, timer, status } =
-    useGameClient();
+  const {
+    room,
+    me,
+    send,
+    notification,
+    clearNotification,
+    clearRoom,
+    timer,
+    status,
+    connectionId,
+    sessionEnded,
+  } = useGameClient();
   const reconnectToken = useMemo(() => getReconnectToken(), []);
 
   const [urlRoomCode, setUrlRoomCode] = useState(
@@ -63,9 +73,9 @@ export default function App() {
   const [showLastTrick, setShowLastTrick] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
-  function resetToHome() {
+  function resetToHome({ keepNotification = false } = {}) {
     clearRoom();
-    clearNotification();
+    if (!keepNotification) clearNotification();
     lastJoinedConnectionRef.current = null;
     window.localStorage.removeItem('judgment:lastRoom');
     setStoredRoomCode('');
@@ -97,27 +107,31 @@ export default function App() {
     return () => window.clearTimeout(timerId);
   }, [room?.lastTrick?.id]);
 
+  // Rejoin once on EVERY new connection (page load or automatic reconnect
+  // after a network drop). Previously this was skipped whenever the old room
+  // was still on screen, so a reconnected socket never told the server who it
+  // was and every move failed with "Not in a room".
+  const rejoinName = mePlayer?.name || autoRejoinName;
   useEffect(() => {
     if (status !== 'connected') return;
-    if (room) return;
-    if (!urlRoomCode || !autoRejoinName) return;
+    if (!urlRoomCode || !rejoinName) return;
+    if (lastJoinedConnectionRef.current === connectionId) return;
 
-    const connectionKey = `${urlRoomCode}:${status}:${Date.now().toString().slice(0, -3)}`;
-    if (lastJoinedConnectionRef.current === urlRoomCode) return;
-
-    lastJoinedConnectionRef.current = urlRoomCode;
+    lastJoinedConnectionRef.current = connectionId;
     send('room:join', {
-      name: autoRejoinName,
+      name: rejoinName,
       roomCode: urlRoomCode,
       reconnectToken,
     });
-  }, [status, room, urlRoomCode, autoRejoinName, send, reconnectToken]);
+  }, [status, connectionId, urlRoomCode, rejoinName, send, reconnectToken]);
 
+  // Server closed the room or this seat moved to another tab/device:
+  // go home and stop auto-rejoining, but keep the message visible.
   useEffect(() => {
-    if (status === 'disconnected') {
-      lastJoinedConnectionRef.current = null;
-    }
-  }, [status]);
+    if (!sessionEnded) return;
+    resetToHome({ keepNotification: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionEnded]);
 
   if (!room) {
     return (
@@ -133,6 +147,7 @@ export default function App() {
           onHelp={() => setShowHelp(true)}
           onCreate={(payload) => {
             window.localStorage.setItem(`judgment:name:pending`, payload.name);
+            lastJoinedConnectionRef.current = connectionId;
             send('room:create', { ...payload, reconnectToken });
           }}
           onJoin={(payload) => {
@@ -143,6 +158,7 @@ export default function App() {
             window.localStorage.setItem('judgment:lastRoom', payload.roomCode);
             setStoredRoomCode(payload.roomCode);
             setUrlRoomCode(payload.roomCode);
+            lastJoinedConnectionRef.current = connectionId;
             send('room:join', { ...payload, reconnectToken });
           }}
         />
@@ -161,7 +177,7 @@ export default function App() {
           onDismiss={clearNotification}
           onHelp={() => setShowHelp(true)}
           onStart={() => send('room:start', { roomCode: room.code })}
-          onCreateNewGame={resetToHome}
+          onCreateNewGame={() => resetToHome()}
         />
         <HelpModal open={showHelp} onClose={() => setShowHelp(false)} />
       </>
@@ -211,6 +227,11 @@ export default function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            {status !== 'connected' ? (
+              <div className="rounded-full border border-red-400/60 bg-red-400/10 px-4 py-2 text-sm text-red-100">
+                Reconnecting…
+              </div>
+            ) : null}
             <Timer seconds={timer} />
             <div className="rounded-full border border-white/15 bg-black/40 px-4 py-2 text-sm">
               Turn: {room.currentTurnPlayerName}

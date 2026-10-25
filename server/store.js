@@ -32,8 +32,16 @@ export default class Store {
       .single();
     if (error) return null;
     if (data?.state) {
-      this.rooms.set(code, data.state);
-      return data.state;
+      const room = data.state;
+      // Loaded after a server restart: no sockets exist yet, so nobody is
+      // actually connected. Seats come back online as players rejoin.
+      room.players.forEach((player) => {
+        player.connected = false;
+      });
+      room.allDisconnectedSince = Date.now();
+      room.lastActivityAt ??= Date.now();
+      this.rooms.set(code, room);
+      return room;
     }
     return null;
   }

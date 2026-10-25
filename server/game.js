@@ -31,27 +31,32 @@ export function createRoom({ name, maxPlayers, decks, reconnectToken }) {
     lastTrick: null,
     currentTurnPlayerId: hostId,
     currentTurnPlayerName: name,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    lastActivityAt: Date.now(),
+    allDisconnectedSince: null
   };
 }
 
+function normalizeName(name) {
+  return String(name ?? '').trim().toLowerCase();
+}
+
+// Find a seat by name, ignoring case and stray spaces (mobile keyboards
+// often add a trailing space).
+export function findPlayerByName(room, name) {
+  const wanted = normalizeName(name);
+  if (!wanted) return null;
+  return room.players.find((player) => normalizeName(player.name) === wanted) ?? null;
+}
+
+// Adds a brand-new player. Returning players are matched in index.js
+// (by device token, then by name) before this is called.
 export function addPlayer(room, name, reconnectToken) {
   if (!name || name.trim().length === 0) {
     throw new Error('Name is required.');
   }
-  if (reconnectToken) {
-    const existingByToken = room.players.find((player) => player.reconnectToken === reconnectToken);
-    if (existingByToken) {
-      return existingByToken.id;
-    }
-  }
-  const existing = room.players.find((player) => player.name.toLowerCase() === name.toLowerCase());
-  if (existing) {
-    if (room.phase !== 'lobby') {
-      throw new Error('This player can only rejoin from the original device.');
-    }
-    existing.reconnectToken = reconnectToken ?? existing.reconnectToken ?? nanoid();
-    return existing.id;
+  if (findPlayerByName(room, name)) {
+    throw new Error('That name is already taken in this room.');
   }
   if (room.phase !== 'lobby') {
     throw new Error('Game already started.');
@@ -82,7 +87,8 @@ function createPlayer(id, name, seatIndex, reconnectToken) {
     reconnectToken: reconnectToken ?? nanoid(),
     totalScore: 0,
     hand: [],
-    handCount: 0
+    handCount: 0,
+    connected: true
   };
 }
 
@@ -342,6 +348,7 @@ export function roomView(room, viewerId) {
       seatIndex: player.seatIndex,
       totalScore: player.totalScore,
       handCount: player.hand.length,
+      connected: player.connected !== false,
       hand: player.id === viewerId ? player.hand : undefined
     }));
 

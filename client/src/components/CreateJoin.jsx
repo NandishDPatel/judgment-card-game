@@ -131,6 +131,9 @@ export default function CreateJoin({
             {initialRoomCode ? (
               <div className="mt-4 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-felt-200">
                 Joining room <span className="font-semibold text-felt-50">{roomCode}</span>
+                <div className="mt-1 text-xs">
+                  Rejoining a game? Enter the exact same name you used before.
+                </div>
               </div>
             ) : (
               <>
